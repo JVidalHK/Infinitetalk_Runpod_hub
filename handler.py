@@ -477,6 +477,38 @@ def handler(job):
     else:
         logger.warning("⚠️ WanVideoBlockSwap 노드를 찾을 수 없습니다.")
 
+    # ------------------------------------------------------------------
+    # VAE tiling, overridable per request.
+    # ------------------------------------------------------------------
+    # Decoding hundreds of frames in one allocation is what puts a ceiling on
+    # clip length. Measured on this template at 832x480: going from 156 to 348
+    # frames costs 3.9x, an exponent of 1.69 — but at 384x384 the same jump
+    # costs an exponent of 1.22. A limit that softens when the frames get
+    # smaller is a memory limit, not an algorithmic one.
+    #
+    # Tiling trades a little throughput for a bounded allocation, so it should
+    # push that ceiling out. Exposed rather than hardcoded because it is the
+    # thing to measure, and measuring it should not need a rebuild.
+    vae_tiling = bool(job_input.get("vae_tiling", True))
+    for nid, node in prompt.items():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") == "WanVideoDecode":
+            node.setdefault("inputs", {})["enable_vae_tiling"] = vae_tiling
+            logger.info(f"✅ 노드 {nid} (WanVideoDecode): enable_vae_tiling={vae_tiling}")
+        if node.get("class_type") == "WanVideoImageToVideoMultiTalk":
+            node.setdefault("inputs", {})["tiled_vae"] = vae_tiling
+            # The sliding window itself is worth being able to tune: it decides
+            # how much lives in memory at once.
+            fws = job_input.get("frame_window_size")
+            if fws:
+                node["inputs"]["frame_window_size"] = int(fws)
+            logger.info(
+                f"✅ 노드 {nid} (MultiTalk): tiled_vae={vae_tiling}, "
+                f"frame_window_size={node['inputs'].get('frame_window_size')}"
+            )
+    # ------------------------------------------------------------------
+
     # The loader must agree: keeping the model on the offload device while asking
     # for zero swapped blocks would stream it anyway and undo the change.
     load_device = "offload_device" if blocks_to_swap > 0 else "main_device"
