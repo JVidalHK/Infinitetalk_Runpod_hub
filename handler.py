@@ -139,9 +139,18 @@ def queue_prompt(prompt, input_type="image", person_count="single"):
         logger.info(f"프롬프트 전송 성공: {result}")
         return result
     except urllib.error.HTTPError as e:
+        # ComfyUI explains a rejected prompt in the response body — which node,
+        # which input, what was wrong. Re-raising a bare HTTPError throws that
+        # away and leaves "HTTP Error 400: Bad Request" as the only clue, which
+        # costs a full image rebuild to investigate. Carry the detail along.
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8")
+        except Exception:
+            pass
         logger.error(f"HTTP 에러 발생: {e.code} - {e.reason}")
-        logger.error(f"응답 내용: {e.read().decode('utf-8')}")
-        raise
+        logger.error(f"응답 내용: {detail}")
+        raise RuntimeError(f"ComfyUI rejected the prompt ({e.code}): {detail[:2000]}") from e
     except Exception as e:
         logger.error(f"프롬프트 전송 중 오류: {e}")
         raise
