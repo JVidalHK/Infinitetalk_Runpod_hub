@@ -295,7 +295,19 @@ def handler(job):
             log_input[key] = truncate_base64_for_log(log_input[key])
 
     logger.info(f"Received job input: {log_input}")
+
+    # Inputs are staged inside ComfyUI's own input directory.
+    #
+    # LoadImage and LoadAudio used to accept any absolute path. Current ComfyUI
+    # resolves the value against its input folder and refuses anything outside
+    # it, so writing to /task_<uuid>/ and handing over the full path now fails
+    # validation with "Invalid image file" before a single frame is sampled.
+    #
+    # The uuid moves from the directory into the filename, which keeps
+    # concurrent jobs from colliding on one shared folder.
     task_id = f"task_{uuid.uuid4()}"
+    COMFY_INPUT_DIR = "/ComfyUI/input"
+    os.makedirs(COMFY_INPUT_DIR, exist_ok=True)
 
     # 입력 타입과 인물 수 확인
     input_type = job_input.get("input_type", "image")  # "image" 또는 "video"
@@ -313,15 +325,15 @@ def handler(job):
         # 이미지 입력 처리 (image_path, image_url, image_base64 중 하나만 사용)
         if "image_path" in job_input:
             media_path = process_input(
-                job_input["image_path"], task_id, "input_image.jpg", "path"
+                job_input["image_path"], COMFY_INPUT_DIR, f"{task_id}_input_image.jpg", "path"
             )
         elif "image_url" in job_input:
             media_path = process_input(
-                job_input["image_url"], task_id, "input_image.jpg", "url"
+                job_input["image_url"], COMFY_INPUT_DIR, f"{task_id}_input_image.jpg", "url"
             )
         elif "image_base64" in job_input:
             media_path = process_input(
-                job_input["image_base64"], task_id, "input_image.jpg", "base64"
+                job_input["image_base64"], COMFY_INPUT_DIR, f"{task_id}_input_image.jpg", "base64"
             )
         else:
             # 기본값 사용
@@ -331,15 +343,15 @@ def handler(job):
         # 비디오 입력 처리 (video_path, video_url, video_base64 중 하나만 사용)
         if "video_path" in job_input:
             media_path = process_input(
-                job_input["video_path"], task_id, "input_video.mp4", "path"
+                job_input["video_path"], COMFY_INPUT_DIR, f"{task_id}_input_video.mp4", "path"
             )
         elif "video_url" in job_input:
             media_path = process_input(
-                job_input["video_url"], task_id, "input_video.mp4", "url"
+                job_input["video_url"], COMFY_INPUT_DIR, f"{task_id}_input_video.mp4", "url"
             )
         elif "video_base64" in job_input:
             media_path = process_input(
-                job_input["video_base64"], task_id, "input_video.mp4", "base64"
+                job_input["video_base64"], COMFY_INPUT_DIR, f"{task_id}_input_video.mp4", "base64"
             )
         else:
             # 기본값 사용 (비디오가 없는 경우 기본 이미지 사용)
@@ -352,15 +364,15 @@ def handler(job):
 
     if "wav_path" in job_input:
         wav_path = process_input(
-            job_input["wav_path"], task_id, "input_audio.wav", "path"
+            job_input["wav_path"], COMFY_INPUT_DIR, f"{task_id}_input_audio.wav", "path"
         )
     elif "wav_url" in job_input:
         wav_path = process_input(
-            job_input["wav_url"], task_id, "input_audio.wav", "url"
+            job_input["wav_url"], COMFY_INPUT_DIR, f"{task_id}_input_audio.wav", "url"
         )
     elif "wav_base64" in job_input:
         wav_path = process_input(
-            job_input["wav_base64"], task_id, "input_audio.wav", "base64"
+            job_input["wav_base64"], COMFY_INPUT_DIR, f"{task_id}_input_audio.wav", "base64"
         )
     else:
         # 기본값 사용
@@ -371,15 +383,15 @@ def handler(job):
     if person_count == "multi":
         if "wav_path_2" in job_input:
             wav_path_2 = process_input(
-                job_input["wav_path_2"], task_id, "input_audio_2.wav", "path"
+                job_input["wav_path_2"], COMFY_INPUT_DIR, f"{task_id}_input_audio_2.wav", "path"
             )
         elif "wav_url_2" in job_input:
             wav_path_2 = process_input(
-                job_input["wav_url_2"], task_id, "input_audio_2.wav", "url"
+                job_input["wav_url_2"], COMFY_INPUT_DIR, f"{task_id}_input_audio_2.wav", "url"
             )
         elif "wav_base64_2" in job_input:
             wav_path_2 = process_input(
-                job_input["wav_base64_2"], task_id, "input_audio_2.wav", "base64"
+                job_input["wav_base64_2"], COMFY_INPUT_DIR, f"{task_id}_input_audio_2.wav", "base64"
             )
         else:
             # 기본값 사용 (첫 번째 오디오와 동일)
@@ -498,13 +510,13 @@ def handler(job):
     # 워크플로우 노드 설정
     if input_type == "image":
         # I2V 워크플로우: 이미지 입력 설정
-        prompt["284"]["inputs"]["image"] = media_path
+        prompt["284"]["inputs"]["image"] = os.path.basename(media_path)
     else:
         # V2V 워크플로우: 비디오 입력 설정
-        prompt["228"]["inputs"]["video"] = media_path
+        prompt["228"]["inputs"]["video"] = os.path.basename(media_path)
 
     # 공통 설정
-    prompt["125"]["inputs"]["audio"] = wav_path
+    prompt["125"]["inputs"]["audio"] = os.path.basename(wav_path)
     prompt["241"]["inputs"]["positive_prompt"] = prompt_text
     prompt["245"]["inputs"]["value"] = width
     prompt["246"]["inputs"]["value"] = height
