@@ -466,12 +466,23 @@ def handler(job):
     # Exposed as an input rather than simply set to 0 so the two can be compared
     # on the same image, and so a future 24GB card can still be served by raising
     # it instead of rebuilding.
-    blocks_to_swap = job_input.get("blocks_to_swap", 0)
+    blocks_to_swap = int(job_input.get("blocks_to_swap", 0))
     swap_node_id = next(
         (nid for nid, n in prompt.items() if n.get("class_type") == "WanVideoBlockSwap"),
         None,
     )
-    if swap_node_id is not None:
+    if blocks_to_swap < 0:
+        # True bypass, the way community workflows do it: the loader never sees
+        # block_swap_args at all. With 0 the node still runs and hands the
+        # loader an empty config; whether that costs anything real is exactly
+        # what -1 lets us measure against 0 without another rebuild.
+        for n in prompt.values():
+            if isinstance(n, dict) and n.get("class_type") == "WanVideoModelLoader":
+                n.get("inputs", {}).pop("block_swap_args", None)
+        if swap_node_id is not None:
+            del prompt[swap_node_id]
+        logger.info("✅ WanVideoBlockSwap: bypass (nodo eliminado del prompt)")
+    elif swap_node_id is not None:
         prompt[swap_node_id].setdefault("inputs", {})["blocks_to_swap"] = blocks_to_swap
         logger.info(f"✅ 노드 {swap_node_id} (WanVideoBlockSwap): blocks_to_swap={blocks_to_swap}")
     else:
@@ -549,6 +560,16 @@ def handler(job):
 
     # 공통 설정
     prompt["125"]["inputs"]["audio"] = os.path.basename(wav_path)
+    # The distill LoRA is rated for 4 steps; the workflow ships 6. Whether 4
+    # holds up on lips and teeth is a judgement call to make by eye, so it is a
+    # request knob rather than a hardcoded change.
+    sample_steps = job_input.get("sample_steps")
+    if sample_steps:
+        for n in prompt.values():
+            if isinstance(n, dict) and n.get("class_type") == "WanVideoSampler":
+                n.setdefault("inputs", {})["steps"] = int(sample_steps)
+                logger.info(f"✅ WanVideoSampler: steps={sample_steps}")
+
     prompt["241"]["inputs"]["positive_prompt"] = prompt_text
     prompt["245"]["inputs"]["value"] = width
     prompt["246"]["inputs"]["value"] = height
