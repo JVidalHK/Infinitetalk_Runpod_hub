@@ -435,6 +435,39 @@ def handler(job):
         logger.warning("⚠️ 경고: WanVideoSampler 노드를 찾을 수 없습니다. 워크플로우 기본값을 사용합니다.")
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Block swap, overridable per request.
+    # ------------------------------------------------------------------
+    # Upstream hardcodes 20 so the 14B model fits a 24GB card: twenty transformer
+    # blocks live in system RAM and cross PCIe on every step. On a 48GB L40S the
+    # fp8 model (~17GB) fits in VRAM whole, and those transfers are pure loss.
+    #
+    # Exposed as an input rather than simply set to 0 so the two can be compared
+    # on the same image, and so a future 24GB card can still be served by raising
+    # it instead of rebuilding.
+    blocks_to_swap = job_input.get("blocks_to_swap", 0)
+    swap_node_id = next(
+        (nid for nid, n in prompt.items() if n.get("class_type") == "WanVideoBlockSwap"),
+        None,
+    )
+    if swap_node_id is not None:
+        prompt[swap_node_id].setdefault("inputs", {})["blocks_to_swap"] = blocks_to_swap
+        logger.info(f"✅ 노드 {swap_node_id} (WanVideoBlockSwap): blocks_to_swap={blocks_to_swap}")
+    else:
+        logger.warning("⚠️ WanVideoBlockSwap 노드를 찾을 수 없습니다.")
+
+    # The loader must agree: keeping the model on the offload device while asking
+    # for zero swapped blocks would stream it anyway and undo the change.
+    load_device = "offload_device" if blocks_to_swap > 0 else "main_device"
+    loader_node_id = next(
+        (nid for nid, n in prompt.items() if n.get("class_type") == "WanVideoModelLoader"),
+        None,
+    )
+    if loader_node_id is not None:
+        prompt[loader_node_id].setdefault("inputs", {})["load_device"] = load_device
+        logger.info(f"✅ 노드 {loader_node_id} (WanVideoModelLoader): load_device={load_device}")
+    # ------------------------------------------------------------------
+
     # 파일 존재 여부 확인
     if not os.path.exists(media_path):
         logger.error(f"미디어 파일이 존재하지 않습니다: {media_path}")

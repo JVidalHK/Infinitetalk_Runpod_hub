@@ -13,7 +13,7 @@
       "model": "Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors",
       "base_precision": "fp16_fast",
       "quantization": "fp8_e4m3fn",
-      "load_device": "offload_device",
+      "load_device": "main_device",
       "attention_mode": "sageattn",
       "block_swap_args": [
         "134",
@@ -140,7 +140,7 @@
   },
   "134": {
     "inputs": {
-      "blocks_to_swap": 20,
+      "blocks_to_swap": 0,
       "offload_img_emb": false,
       "offload_txt_emb": false,
       "use_non_blocking": true,
