@@ -225,9 +225,36 @@ def get_videos(ws, prompt, input_type="image", person_count="single"):
     return output_videos
 
 
+def read_gpu_info():
+    """What /gpu_probe.py found at startup, or a marker that it did not run."""
+    try:
+        with open("/gpu_info.json", "r") as f:
+            return json.load(f)
+    except Exception as e:
+        return {"error": f"gpu_info unavailable: {type(e).__name__}: {e}", "sage_ok": False}
+
+
+GPU_INFO = read_gpu_info()
+logger.info(f"GPU: {json.dumps(GPU_INFO)}")
+
+
 def load_workflow(workflow_path):
     with open(workflow_path, "r") as file:
-        return json.load(file)
+        workflow = json.load(file)
+
+    # The workflows ask for sageattn by name. On a worker whose SageAttention
+    # build has no kernel for its architecture that request is fatal: sampling
+    # raises, no output node is produced, and the failure reaches the caller as
+    # "video not found" with nothing pointing at the GPU. Downgrading to sdpa
+    # costs about one percent and keeps the job alive.
+    if not GPU_INFO.get("sage_ok"):
+        for node in workflow.values():
+            inputs = node.get("inputs") if isinstance(node, dict) else None
+            if isinstance(inputs, dict) and inputs.get("attention_mode") == "sageattn":
+                inputs["attention_mode"] = "sdpa"
+        logger.warning("SageAttention unavailable on this GPU; workflow downgraded to sdpa")
+
+    return workflow
 
 
 def get_workflow_path(input_type, person_count):
@@ -645,7 +672,10 @@ def handler(job):
 
     if not output_video_path:
         logger.error("출력 비디오를 찾을 수 없습니다. 모든 노드가 비어있습니다.")
-        return {"error": "비디오를 찾을 수 없습니다."}
+        # Carries the GPU with the failure: this is the exact shape an
+        # architecture-mismatched attention kernel takes, and without the
+        # card in the payload the cause is invisible from the caller.
+        return {"error": "비디오를 찾을 수 없습니다.", "gpu": GPU_INFO}
 
     # 비디오 파일 존재 여부 확인
     if not os.path.exists(output_video_path):
@@ -687,7 +717,7 @@ def handler(job):
                     f"⚠️ 파일 크기가 일치하지 않습니다: 원본={source_file_size}, 복사본={copied_file_size}"
                 )
 
-            return {"video_path": output_path}
+            return {"video_path": output_path, "gpu": GPU_INFO}
 
         except Exception as e:
             logger.error(f"❌ 비디오 복사 실패: {e}")
@@ -711,7 +741,7 @@ def handler(job):
             logger.info(
                 f"✅ Base64 인코딩된 비디오 반환: {truncate_base64_for_log(video_data)}"
             )
-            return {"video": video_data}
+            return {"video": video_data, "gpu": GPU_INFO}
 
         except Exception as e:
             logger.error(f"❌ Base64 인코딩 실패: {e}")

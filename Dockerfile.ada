@@ -11,7 +11,7 @@
 #
 # Dockerfile.ada and Dockerfile.h100 are this file with a different default
 # below and nothing else; keep the three in step.
-ARG BASE_IMAGE=wlsdml1114/engui_genai-base_blackwell:1.1
+ARG BASE_IMAGE=wlsdml1114/engui_genai-base_ada:1.1
 FROM ${BASE_IMAGE} as runtime
 
 # wget 설치 (URL 다운로드를 위해)

@@ -3,9 +3,27 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+# Find out what hardware this worker got before anything tries to use it.
+#
+# The base images carry SageAttention compiled for one architecture. Landing on
+# a foreign one does not degrade to a slower kernel — the first attention call
+# raises, ComfyUI finishes with no output node, and the job returns only
+# "video not found". Starting ComfyUI on sdpa instead costs about one percent
+# and keeps the worker serving, which is a far better trade than a crash.
+echo "Probing GPU..."
+python /gpu_probe.py || echo "gpu_probe failed; assuming SageAttention is unavailable"
+
+SAGE_FLAG="--use-sage-attention"
+if python -c "import json,sys; sys.exit(0 if json.load(open('/gpu_info.json')).get('sage_ok') else 1)" 2>/dev/null; then
+    echo "SageAttention has a kernel for this GPU; enabling it."
+else
+    echo "SageAttention has no kernel for this GPU; starting ComfyUI on sdpa."
+    SAGE_FLAG=""
+fi
+
 # Start ComfyUI in the background
 echo "Starting ComfyUI in the background..."
-python /ComfyUI/main.py --listen --use-sage-attention &
+python /ComfyUI/main.py --listen $SAGE_FLAG &
 
 # Wait for ComfyUI to be ready
 echo "Waiting for ComfyUI to be ready..."
